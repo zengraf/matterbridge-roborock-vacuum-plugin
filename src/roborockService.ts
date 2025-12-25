@@ -21,6 +21,7 @@ import {
   SceneParam,
   MapInfo,
 } from './roborockCommunication/index.js';
+import { UrlByEmailResult } from './roborockCommunication/RESTAPI/roborockAuthenticateApi.js';
 import type { AbstractMessageHandler, AbstractMessageListener, BatteryMessage, DeviceErrorMessage, DeviceStatusNotify, MultipleMap } from './roborockCommunication/index.js';
 import { ServiceArea } from 'matterbridge/matter/clusters';
 import { LocalNetworkClient } from './roborockCommunication/broadcast/client/LocalNetworkClient.js';
@@ -77,24 +78,57 @@ export default class RoborockService {
     this.clientManager = clientManager;
   }
 
-  public async loginWithPassword(
-    username: string,
-    password: string,
-    loadSavedUserData: () => Promise<UserData | undefined>,
-    savedUserData: (userData: UserData) => Promise<void>,
-  ): Promise<UserData> {
-    let userdata = await loadSavedUserData();
+  /**
+   * Requests a 2FA code to be sent to the user's email.
+   * @param username The user's email address
+   * @returns The URL result containing base URL and country info for later use
+   */
+  public async requestCode(username: string): Promise<UrlByEmailResult> {
+    this.logger.debug('Requesting 2FA code for user', username);
+    return this.loginApi.requestCode(username);
+  }
 
-    if (!userdata) {
-      this.logger.debug('No saved user data found, logging in with password');
-      userdata = await this.loginApi.loginWithPassword(username, password);
-      await savedUserData(userdata);
+  /**
+   * Logs in with a 2FA code.
+   * @param username The user's email address
+   * @param twofa The 2FA code received via email
+   * @param urlResult The URL result from requestCode (containing baseUrl, country, countryCode)
+   * @param savedUserData Callback to persist user data after successful login
+   * @returns UserData containing authentication tokens
+   */
+  public async loginWithCode(username: string, twofa: string, urlResult: UrlByEmailResult, savedUserData: (userData: UserData) => Promise<void>): Promise<UserData> {
+    let userdata: UserData;
+
+    // Use V4 login if country info is available, otherwise fall back to V1
+    if (urlResult.country && urlResult.countryCode) {
+      this.logger.debug('Logging in with V4 API using country info');
+      userdata = await this.loginApi.loginWithCodeV4(username, twofa, urlResult.baseUrl, urlResult.country, urlResult.countryCode);
     } else {
-      this.logger.debug('Using saved user data for login', debugStringify(userdata));
-      userdata = await this.loginApi.loginWithUserData(username, userdata);
+      this.logger.debug('Logging in with V1 API (no country info available)');
+      userdata = await this.loginApi.loginWithCode(username, twofa, urlResult.baseUrl);
     }
 
+    await savedUserData(userdata);
     return this.auth(userdata);
+  }
+
+  /**
+   * Attempts to restore a session using saved user data.
+   * @param username The user's email address
+   * @param loadSavedUserData Callback to load saved user data
+   * @returns UserData if saved data exists and is valid, undefined otherwise
+   */
+  public async restoreSession(username: string, loadSavedUserData: () => Promise<UserData | undefined>): Promise<UserData | undefined> {
+    const userdata = await loadSavedUserData();
+
+    if (!userdata) {
+      this.logger.debug('No saved user data found');
+      return undefined;
+    }
+
+    this.logger.debug('Using saved user data for login', debugStringify(userdata));
+    const restoredUserData = await this.loginApi.loginWithUserData(username, userdata);
+    return this.auth(restoredUserData);
   }
 
   public getMessageProcessor(duid: string): MessageProcessor | undefined {

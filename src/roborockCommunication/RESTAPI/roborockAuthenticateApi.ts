@@ -6,6 +6,13 @@ import { AuthenticateResponse } from '../Zmodel/authenticateResponse.js';
 import { BaseUrl } from '../Zmodel/baseURL.js';
 import { HomeInfo } from '../Zmodel/homeInfo.js';
 import { UserData } from '../Zmodel/userData.js';
+import { SignCodeV3 } from '../Zmodel/signCodeV3.js';
+
+export interface UrlByEmailResult {
+  baseUrl: string;
+  country: string;
+  countryCode: string;
+}
 
 export class RoborockAuthenticateApi {
   private readonly logger: AnsiLogger;
@@ -13,6 +20,8 @@ export class RoborockAuthenticateApi {
   private deviceId: string;
   private username?: string;
   private authToken?: string;
+  private country = '';
+  private countryCode = '';
 
   constructor(logger: AnsiLogger, axiosFactory: AxiosStatic = axios) {
     this.deviceId = crypto.randomUUID();
@@ -25,17 +34,108 @@ export class RoborockAuthenticateApi {
     return userData;
   }
 
-  public async loginWithPassword(username: string, password: string): Promise<UserData> {
-    const api = await this.getAPIFor(username);
+  /**
+   * Requests a 2FA code to be sent to the user's email.
+   * @param username The user's email address
+   * @returns The base URL and country information for subsequent API calls
+   */
+  public async requestCode(username: string): Promise<UrlByEmailResult> {
+    const urlResult = await this.getUrlByEmail(username);
+
+    const api = await this.apiForUser(username, urlResult.baseUrl);
+    await api.post(
+      'api/v4/email/code/send',
+      new URLSearchParams({
+        email: username,
+        type: 'login',
+        platform: '',
+      }).toString(),
+      {
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          header_clientlang: 'en',
+        },
+      },
+    );
+
+    return urlResult;
+  }
+
+  /**
+   * Logs in with a 2FA code using the V1 API.
+   * @param username The user's email address
+   * @param twofa The 2FA code received via email
+   * @param baseUrl The base URL obtained from requestCode
+   * @returns UserData containing authentication tokens
+   */
+  public async loginWithCode(username: string, twofa: string, baseUrl: string): Promise<UserData> {
+    const api = await this.apiForUser(username, baseUrl);
     const response = await api.post(
       'api/v1/login',
       new URLSearchParams({
         username: username,
-        password: password,
-        needtwostepauth: 'false',
+        verifycode: twofa,
+        verifycodetype: 'AUTH_EMAIL_CODE',
       }).toString(),
     );
     return this.auth(username, response.data);
+  }
+
+  /**
+   * Logs in with a 2FA code using the V4 API (preferred method when country info is available).
+   * @param username The user's email address
+   * @param twofa The 2FA code received via email
+   * @param baseUrl The base URL obtained from requestCode
+   * @param country The country name
+   * @param countryCode The country code
+   * @returns UserData containing authentication tokens
+   */
+  public async loginWithCodeV4(username: string, twofa: string, baseUrl: string, country: string, countryCode: string): Promise<UserData> {
+    const xMercyKs = crypto.randomUUID().substring(0, 16);
+    const signCode = await this.signKeyV3(username, baseUrl, xMercyKs);
+
+    if (!signCode?.data?.k) {
+      throw new Error('Failed to obtain sign key for V4 login');
+    }
+
+    const api = await this.apiForUser(username, baseUrl);
+    const response = await api.post(
+      'api/v4/auth/email/login/code',
+      new URLSearchParams({
+        country: country,
+        countryCode: countryCode,
+        email: username,
+        code: twofa,
+        majorVersion: '14',
+        minorVersion: '0',
+      }).toString(),
+      {
+        headers: {
+          'content-type': 'application/json',
+          'x-mercy-ks': xMercyKs,
+          'x-mercy-k': signCode.data.k,
+          header_clientlang: 'en',
+          header_appversion: '4.54.02',
+          header_phonesystem: 'iOS',
+          header_phonemodel: 'iPhone16,1',
+        },
+      },
+    );
+    return this.auth(username, response.data);
+  }
+
+  /**
+   * Signs a key using the V3 API (required for V4 login).
+   */
+  private async signKeyV3(username: string, baseUrl: string, nonce: string): Promise<SignCodeV3 | undefined> {
+    const api = await this.apiForUser(username, baseUrl);
+    const response = await api.post(
+      'api/v3/key/sign',
+      new URLSearchParams({
+        s: nonce,
+      }).toString(),
+    );
+    return response.data as SignCodeV3;
   }
 
   public async getHomeDetails(): Promise<HomeInfo | undefined> {
@@ -54,11 +154,11 @@ export class RoborockAuthenticateApi {
   }
 
   private async getAPIFor(username: string): Promise<AxiosInstance> {
-    const baseUrl = await this.getBaseUrl(username);
-    return this.apiForUser(username, baseUrl);
+    const urlResult = await this.getUrlByEmail(username);
+    return this.apiForUser(username, urlResult.baseUrl);
   }
 
-  private async getBaseUrl(username: string): Promise<string> {
+  private async getUrlByEmail(username: string): Promise<UrlByEmailResult> {
     const api = await this.apiForUser(username);
     const response = await api.post(
       'api/v1/getUrlByEmail',
@@ -73,7 +173,14 @@ export class RoborockAuthenticateApi {
       throw new Error('Failed to retrieve base URL: ' + apiResponse.msg);
     }
 
-    return apiResponse.data.url;
+    this.country = apiResponse.data.country;
+    this.countryCode = apiResponse.data.countrycode;
+
+    return {
+      baseUrl: apiResponse.data.url,
+      country: apiResponse.data.country,
+      countryCode: apiResponse.data.countrycode,
+    };
   }
 
   private async apiForUser(username: string, baseUrl = 'https://usiot.roborock.com'): Promise<AxiosInstance> {

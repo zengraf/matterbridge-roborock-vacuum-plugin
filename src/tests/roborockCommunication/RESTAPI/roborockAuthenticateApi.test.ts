@@ -32,29 +32,78 @@ describe('RoborockAuthenticateApi', () => {
     expect(result).toBe(userData);
   });
 
-  it('loginWithPassword should call auth and return userData', async () => {
+  it('requestCode should call getUrlByEmail and send code request', async () => {
+    const urlResult = { baseUrl: 'http://base.url', country: 'US', countryCode: 'us' };
+    jest.spyOn(api as any, 'getUrlByEmail').mockResolvedValue(urlResult);
+    jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
+    mockAxiosInstance.post.mockResolvedValue({ data: {} });
+
+    const result = await api.requestCode('user');
+    expect(result).toEqual(urlResult);
+    expect(api['getUrlByEmail']).toHaveBeenCalledWith('user');
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+      'api/v4/email/code/send',
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'content-type': 'application/x-www-form-urlencoded',
+          header_clientlang: 'en',
+        }),
+      }),
+    );
+  });
+
+  it('loginWithCode should call auth and return userData', async () => {
     const userData = { token: 'tok', other: 'data' };
     const response = { data: { data: userData } };
-    jest.spyOn(api as any, 'getAPIFor').mockResolvedValue(mockAxiosInstance);
+    jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
     mockAxiosInstance.post.mockResolvedValue(response);
     jest.spyOn(api as any, 'auth').mockReturnValue(userData);
 
-    const result = await api.loginWithPassword('user', 'pass');
+    const result = await api.loginWithCode('user', '123456', 'http://base.url');
     expect(result).toBe(userData);
-    expect(mockAxiosInstance.post).toHaveBeenCalled();
-    expect(api['getAPIFor']).toHaveBeenCalledWith('user');
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('api/v1/login', expect.stringContaining('verifycode=123456'));
     expect(api['auth']).toHaveBeenCalledWith('user', response.data);
   });
 
-  it('loginWithPassword should throw error if token missing', async () => {
+  it('loginWithCode should throw error if token missing', async () => {
     const response = { data: { data: null, msg: 'fail', code: 401 } };
-    jest.spyOn(api as any, 'getAPIFor').mockResolvedValue(mockAxiosInstance);
+    jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
     mockAxiosInstance.post.mockResolvedValue(response);
     jest.spyOn(api as any, 'auth').mockImplementation(() => {
       throw new Error('Authentication failed: fail code: 401');
     });
 
-    await expect(api.loginWithPassword('user', 'pass')).rejects.toThrow('Authentication failed: fail code: 401');
+    await expect(api.loginWithCode('user', '123456', 'http://base.url')).rejects.toThrow('Authentication failed: fail code: 401');
+  });
+
+  it('loginWithCodeV4 should call signKeyV3 and auth', async () => {
+    const userData = { token: 'tok', other: 'data' };
+    const signCodeResponse = { data: { k: 'signkey' } };
+    const loginResponse = { data: { data: userData } };
+    jest.spyOn(api as any, 'signKeyV3').mockResolvedValue(signCodeResponse);
+    jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
+    mockAxiosInstance.post.mockResolvedValue(loginResponse);
+    jest.spyOn(api as any, 'auth').mockReturnValue(userData);
+
+    const result = await api.loginWithCodeV4('user', '123456', 'http://base.url', 'US', 'us');
+    expect(result).toBe(userData);
+    expect(api['signKeyV3']).toHaveBeenCalled();
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+      'api/v4/auth/email/login/code',
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-mercy-k': 'signkey',
+        }),
+      }),
+    );
+  });
+
+  it('loginWithCodeV4 should throw error if signKeyV3 fails', async () => {
+    jest.spyOn(api as any, 'signKeyV3').mockResolvedValue({ data: null });
+
+    await expect(api.loginWithCodeV4('user', '123456', 'http://base.url', 'US', 'us')).rejects.toThrow('Failed to obtain sign key for V4 login');
   });
 
   it('getHomeDetails should return undefined if username/authToken missing', async () => {
@@ -84,19 +133,19 @@ describe('RoborockAuthenticateApi', () => {
     expect(result).toBe(homeInfo);
   });
 
-  it('getBaseUrl should throw error if response.data missing', async () => {
+  it('getUrlByEmail should throw error if response.data missing', async () => {
     jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
     mockAxiosInstance.post.mockResolvedValue({ data: { data: null, msg: 'fail' } });
 
-    await expect(api['getBaseUrl']('user')).rejects.toThrow('Failed to retrieve base URL: fail');
+    await expect(api['getUrlByEmail']('user')).rejects.toThrow('Failed to retrieve base URL: fail');
   });
 
-  it('getBaseUrl should return url if present', async () => {
+  it('getUrlByEmail should return UrlByEmailResult if present', async () => {
     jest.spyOn(api as any, 'apiForUser').mockResolvedValue(mockAxiosInstance);
-    mockAxiosInstance.post.mockResolvedValue({ data: { data: { url: 'http://base.url' } } });
+    mockAxiosInstance.post.mockResolvedValue({ data: { data: { url: 'http://base.url', country: 'US', countrycode: 'us' } } });
 
-    const result = await api['getBaseUrl']('user');
-    expect(result).toBe('http://base.url');
+    const result = await api['getUrlByEmail']('user');
+    expect(result).toEqual({ baseUrl: 'http://base.url', country: 'US', countryCode: 'us' });
   });
 
   it('apiForUser should create AxiosInstance with correct headers', async () => {

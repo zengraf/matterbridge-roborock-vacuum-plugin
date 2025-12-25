@@ -1,8 +1,8 @@
 {
   "title": "Matterbridge Roborock Vacuum Plugin",
-  "description": "matterbridge-roborock-vacuum-plugin v. 1.1.1-rc08 by https://github.com/RinDevJunior",
+  "description": "matterbridge-roborock-vacuum-plugin v. 1.1.1-rc09 by https://github.com/RinDevJunior",
   "type": "object",
-  "required": ["username", "password"],
+  "required": ["username"],
   "properties": {
     "name": {
       "description": "Plugin name",
@@ -29,10 +29,9 @@
       "description": "Roborock username (required for the plugin to work)",
       "type": "string"
     },
-    "password": {
-      "description": "Roborock password (required for the plugin to work)",
-      "type": "string",
-      "ui:widget": "password"
+    "twofa": {
+      "description": "2FA code sent to your email. Leave blank until you receive the code via email after saving with just the username.",
+      "type": "string"
     },
     "refreshInterval": {
       "description": "Refresh interval in seconds (default: 60)",

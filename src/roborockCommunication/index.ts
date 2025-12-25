@@ -1,4 +1,4 @@
-export { RoborockAuthenticateApi } from './RESTAPI/roborockAuthenticateApi.js';
+export { RoborockAuthenticateApi, type UrlByEmailResult } from './RESTAPI/roborockAuthenticateApi.js';
 export { RoborockIoTApi } from './RESTAPI/roborockIoTApi.js';
 export { MessageProcessor } from './broadcast/messageProcessor.js';
 export { VacuumErrorCode } from './Zenum/vacuumAndDockErrorCode.js';
@@ -21,3 +21,5 @@ export type { Client } from './broadcast/client.js';
 export type { SceneParam } from './Zmodel/scene.js';
 export type { BatteryMessage, DeviceErrorMessage, DeviceStatusNotify } from './Zmodel/batteryMessage.js';
 export type { MultipleMap } from './Zmodel/multipleMap.js';
+export type { BaseUrl } from './Zmodel/baseURL.js';
+export type { SignCodeV3 } from './Zmodel/signCodeV3.js';

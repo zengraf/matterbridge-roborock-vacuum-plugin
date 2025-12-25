@@ -10,7 +10,6 @@ describe('RoborockService - startClean', () => {
   let mockLogger: AnsiLogger;
   let mockMessageProcessor: jest.Mocked<MessageProcessor>;
   let mockLoginApi: any;
-  let mockMapInfo: any;
   let mockMessageClient: any;
   let mockIotApi: any;
 
@@ -28,11 +27,12 @@ describe('RoborockService - startClean', () => {
     } as any;
 
     mockLoginApi = {
-      loginWithPassword: jest.fn(),
+      requestCode: jest.fn(),
+      loginWithCode: jest.fn(),
+      loginWithCodeV4: jest.fn(),
       loginWithUserData: jest.fn(),
     };
 
-    mockMapInfo = jest.fn();
     roborockService = new RoborockService(() => mockLoginApi, jest.fn(), 10, {} as any, mockLogger);
     roborockService['auth'] = jest.fn((ud) => ud);
     roborockService['messageProcessorMap'] = new Map<string, MessageProcessor>([['test-duid', mockMessageProcessor]]);
@@ -72,7 +72,6 @@ describe('RoborockService - startClean', () => {
     };
     roborockService.messageClient = mockMessageClient;
     mockMessageClient.get.mockResolvedValue(mapData);
-    mockMapInfo.mockImplementation((data) => ({ map: data }));
 
     const result = await roborockService.getMapInformation('duid');
     expect(mockLogger.debug).toHaveBeenCalledWith('RoborockService - getMapInformation', 'duid');
@@ -104,37 +103,74 @@ describe('RoborockService - startClean', () => {
     expect(result).toBeUndefined();
   });
 
-  it('should login with password if no saved user data', async () => {
+  it('should request 2FA code', async () => {
     const username = 'user';
-    const password = 'pass';
+    const urlResult = { baseUrl: 'https://api.roborock.com', country: 'US', countryCode: 'us' };
+    mockLoginApi.requestCode.mockResolvedValue(urlResult);
+
+    const result = await roborockService.requestCode(username);
+
+    expect(mockLogger.debug).toHaveBeenCalledWith('Requesting 2FA code for user', username);
+    expect(mockLoginApi.requestCode).toHaveBeenCalledWith(username);
+    expect(result).toBe(urlResult);
+  });
+
+  it('should login with 2FA code using V4 API when country info is available', async () => {
+    const username = 'user';
+    const twofa = '123456';
+    const urlResult = { baseUrl: 'https://api.roborock.com', country: 'US', countryCode: 'us' };
     const userData = { foo: 'bar' };
-    mockLoginApi.loginWithPassword.mockResolvedValue(userData);
-    const loadSavedUserData = jest.fn().mockResolvedValue(undefined);
+    mockLoginApi.loginWithCodeV4.mockResolvedValue(userData);
     const savedUserData = jest.fn().mockResolvedValue(undefined);
 
-    const result = await roborockService.loginWithPassword(username, password, loadSavedUserData, savedUserData);
+    const result = await roborockService.loginWithCode(username, twofa, urlResult, savedUserData);
 
-    expect(mockLogger.debug).toHaveBeenCalledWith('No saved user data found, logging in with password');
-    expect(mockLoginApi.loginWithPassword).toHaveBeenCalledWith(username, password);
+    expect(mockLogger.debug).toHaveBeenCalledWith('Logging in with V4 API using country info');
+    expect(mockLoginApi.loginWithCodeV4).toHaveBeenCalledWith(username, twofa, urlResult.baseUrl, urlResult.country, urlResult.countryCode);
     expect(savedUserData).toHaveBeenCalledWith(userData);
     expect(roborockService['auth']).toHaveBeenCalledWith(userData);
     expect(result).toBe(userData);
   });
 
-  it('should login with user data if saved user data exists', async () => {
+  it('should login with 2FA code using V1 API when country info is not available', async () => {
     const username = 'user';
-    const password = 'pass';
+    const twofa = '123456';
+    const urlResult = { baseUrl: 'https://api.roborock.com', country: '', countryCode: '' };
+    const userData = { foo: 'bar' };
+    mockLoginApi.loginWithCode.mockResolvedValue(userData);
+    const savedUserData = jest.fn().mockResolvedValue(undefined);
+
+    const result = await roborockService.loginWithCode(username, twofa, urlResult, savedUserData);
+
+    expect(mockLogger.debug).toHaveBeenCalledWith('Logging in with V1 API (no country info available)');
+    expect(mockLoginApi.loginWithCode).toHaveBeenCalledWith(username, twofa, urlResult.baseUrl);
+    expect(savedUserData).toHaveBeenCalledWith(userData);
+    expect(roborockService['auth']).toHaveBeenCalledWith(userData);
+    expect(result).toBe(userData);
+  });
+
+  it('should restore session if saved user data exists', async () => {
+    const username = 'user';
     const userData = { foo: 'bar' };
     mockLoginApi.loginWithUserData.mockResolvedValue(userData);
     const loadSavedUserData = jest.fn().mockResolvedValue(userData);
-    const savedUserData = jest.fn();
 
-    const result = await roborockService.loginWithPassword(username, password, loadSavedUserData, savedUserData);
+    const result = await roborockService.restoreSession(username, loadSavedUserData);
 
     expect(mockLogger.debug).toHaveBeenCalledWith('Using saved user data for login', expect.anything());
     expect(mockLoginApi.loginWithUserData).toHaveBeenCalledWith(username, userData);
     expect(roborockService['auth']).toHaveBeenCalledWith(userData);
     expect(result).toBe(userData);
+  });
+
+  it('should return undefined when restoring session with no saved data', async () => {
+    const username = 'user';
+    const loadSavedUserData = jest.fn().mockResolvedValue(undefined);
+
+    const result = await roborockService.restoreSession(username, loadSavedUserData);
+
+    expect(mockLogger.debug).toHaveBeenCalledWith('No saved user data found');
+    expect(result).toBeUndefined();
   });
 
   it('should start global clean when no areas or selected areas are provided', async () => {

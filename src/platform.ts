@@ -61,8 +61,8 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
     await this.persist.init();
 
     // Verify that the config is correct
-    if (this.config.username === undefined || this.config.password === undefined) {
-      this.log.error('"username" and "password" are required in the config');
+    if (this.config.username === undefined) {
+      this.log.error('"username" is required in the config');
       return;
     }
 
@@ -89,28 +89,66 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
     );
 
     const username = this.config.username as string;
-    const password = this.config.password as string;
+    const twofa = this.config.twofa as string | undefined;
 
-    const userData = await this.roborockService.loginWithPassword(
-      username,
-      password,
-      async () => {
-        if (this.enableExperimentalFeature?.enableExperimentalFeature && this.enableExperimentalFeature.advancedFeature?.alwaysExecuteAuthentication) {
-          this.log.debug('Always execute authentication on startup');
-          return undefined;
-        }
+    // First, try to restore an existing session
+    let userData: UserData | undefined;
 
+    if (!this.enableExperimentalFeature?.enableExperimentalFeature || !this.enableExperimentalFeature.advancedFeature?.alwaysExecuteAuthentication) {
+      userData = await this.roborockService.restoreSession(username, async () => {
         const savedUserData = (await this.persist.getItem('userData')) as UserData | undefined;
         if (savedUserData) {
           this.log.debug('Loading saved userData:', debugStringify(savedUserData));
           return savedUserData;
         }
         return undefined;
-      },
-      async (userData: UserData) => {
-        await this.persist.setItem('userData', userData);
-      },
-    );
+      });
+    }
+
+    // If no saved session, we need to authenticate with OTP
+    if (!userData) {
+      if (!twofa) {
+        // No 2FA code provided - request one to be sent
+        this.log.notice('No saved session found. Requesting 2FA code to be sent to your email...');
+        try {
+          const urlResult = await this.roborockService.requestCode(username);
+          // Store the URL result for when the user provides the 2FA code
+          await this.persist.setItem('pendingAuth', urlResult);
+          this.log.notice(
+            'A 2FA verification code has been sent to your email. Please update the "twofa" field in the plugin configuration with the code you received, then restart the plugin.',
+          );
+          return;
+        } catch (error) {
+          this.log.error('Failed to request 2FA code:', debugStringify(error as object));
+          return;
+        }
+      }
+
+      // 2FA code provided - try to login
+      this.log.notice('Attempting to login with 2FA code...');
+      try {
+        // Try to get the pending auth info (URL result from previous request)
+        let urlResult = (await this.persist.getItem('pendingAuth')) as { baseUrl: string; country: string; countryCode: string } | undefined;
+
+        if (!urlResult) {
+          // If no pending auth, request a new code first (this handles the case where user provides twofa directly)
+          this.log.debug('No pending auth found, requesting URL info...');
+          urlResult = await this.roborockService.requestCode(username);
+        }
+
+        userData = await this.roborockService.loginWithCode(username, twofa, urlResult, async (userData: UserData) => {
+          await this.persist.setItem('userData', userData);
+          // Clear the pending auth and twofa after successful login
+          await this.persist.removeItem('pendingAuth');
+        });
+
+        this.log.notice('Successfully authenticated with Roborock!');
+      } catch (error) {
+        this.log.error('Failed to login with 2FA code:', debugStringify(error as object));
+        this.log.error('Please check that the 2FA code is correct and try again.');
+        return;
+      }
+    }
 
     this.log.debug('Initializing - userData:', debugStringify(userData));
     const devices = await this.roborockService.listDevices(username);
