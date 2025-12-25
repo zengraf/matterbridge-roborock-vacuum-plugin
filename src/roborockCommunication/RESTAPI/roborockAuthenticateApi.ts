@@ -40,6 +40,10 @@ export class RoborockAuthenticateApi {
    * @returns The base URL and country information for subsequent API calls
    */
   public async requestCode(username: string): Promise<UrlByEmailResult> {
+    // Clear any existing auth token to ensure a fresh authentication
+    this.authToken = undefined;
+    this.username = undefined;
+
     const urlResult = await this.getUrlByEmail(username);
 
     const api = await this.apiForUser(username, urlResult.baseUrl);
