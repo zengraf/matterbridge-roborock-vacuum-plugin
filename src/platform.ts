@@ -9,7 +9,7 @@ import { PlatformRunner } from './platformRunner.js';
 import { RoborockVacuumCleaner } from './rvc.js';
 import { configurateBehavior } from './behaviorFactory.js';
 import { NotifyMessageTypes } from './notifyMessageTypes.js';
-import { Device, RoborockAuthenticateApi, RoborockIoTApi, UserData } from './roborockCommunication/index.js';
+import { Device, RoborockAuthenticateApi, RoborockApiError, RoborockIoTApi, UserData } from './roborockCommunication/index.js';
 import { getSupportedAreas, getSupportedScenes } from './initialData/index.js';
 import { CleanModeSettings, createDefaultExperimentalFeatureSetting, ExperimentalFeatureSetting } from './model/ExperimentalFeatureSetting.js';
 import { ServiceArea } from 'matterbridge/matter/clusters';
@@ -151,20 +151,12 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
 
         this.log.notice('Successfully authenticated with Roborock!');
       } catch (error) {
-        // Extract error message from various error formats (axios, standard Error, etc.)
-        let errorMsg = '';
-        if (error instanceof Error) {
-          errorMsg = error.message;
-        }
-        // Check axios error response
-        const axiosError = error as { response?: { data?: { msg?: string; code?: number } } };
-        if (axiosError?.response?.data) {
-          errorMsg += ` ${axiosError.response.data.msg || ''} ${axiosError.response.data.code || ''}`;
-        }
-        this.log.debug('Login error details:', errorMsg, debugStringify(error as object));
+        // Extract error message from various error formats
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.log.error('Login error:', errorMsg);
 
         // Check if this is an expired/invalid 2FA code error
-        if (errorMsg.includes('2031') || errorMsg.includes('two step') || errorMsg.includes('verify') || errorMsg.includes('code')) {
+        if (errorMsg.includes('2031') || errorMsg.includes('two step') || errorMsg.includes('verify')) {
           this.log.warn('The 2FA code is invalid or expired. Requesting a new code...');
           try {
             await this.persist.removeItem('pendingAuth');
@@ -174,10 +166,10 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
               'A new 2FA verification code has been sent to your email. Please update the "twofa" field in the plugin configuration with the new code you received, then restart the plugin.',
             );
           } catch (requestError) {
-            this.log.error('Failed to request new 2FA code:', debugStringify(requestError as object));
+            const reqErrorMsg = requestError instanceof Error ? requestError.message : String(requestError);
+            this.log.error('Failed to request new 2FA code:', reqErrorMsg);
           }
         } else {
-          this.log.error('Failed to login with 2FA code:', debugStringify(error as object));
           this.log.error('Please check that the 2FA code is correct and try again.');
         }
         return;

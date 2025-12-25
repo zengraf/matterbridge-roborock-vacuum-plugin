@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosStatic } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosStatic } from 'axios';
 import crypto from 'node:crypto';
 import { AnsiLogger } from 'matterbridge/logger';
 import { URLSearchParams } from 'node:url';
@@ -12,6 +12,41 @@ export interface UrlByEmailResult {
   baseUrl: string;
   country: string;
   countryCode: string;
+}
+
+export class RoborockApiError extends Error {
+  public readonly code?: number;
+  public readonly apiMessage?: string;
+
+  constructor(message: string, code?: number, apiMessage?: string) {
+    super(message);
+    this.name = 'RoborockApiError';
+    this.code = code;
+    this.apiMessage = apiMessage;
+  }
+}
+
+/**
+ * Extracts a meaningful error message from various error types
+ */
+function extractErrorMessage(error: unknown, context: string): RoborockApiError {
+  if (error instanceof RoborockApiError) {
+    return error;
+  }
+
+  if (error instanceof AxiosError) {
+    const status = error.response?.status;
+    const data = error.response?.data as { msg?: string; code?: number; message?: string } | undefined;
+    const apiMsg = data?.msg || data?.message || error.message;
+    const apiCode = data?.code || status;
+    return new RoborockApiError(`${context}: ${apiMsg} (status: ${status})`, apiCode, apiMsg);
+  }
+
+  if (error instanceof Error) {
+    return new RoborockApiError(`${context}: ${error.message}`);
+  }
+
+  return new RoborockApiError(`${context}: ${String(error)}`);
 }
 
 export class RoborockAuthenticateApi {
@@ -44,25 +79,36 @@ export class RoborockAuthenticateApi {
     this.authToken = undefined;
     this.username = undefined;
 
-    const urlResult = await this.getUrlByEmail(username);
+    try {
+      const urlResult = await this.getUrlByEmail(username);
 
-    const api = await this.apiForUser(username, urlResult.baseUrl);
-    await api.post(
-      'api/v4/email/code/send',
-      new URLSearchParams({
-        email: username,
-        type: 'login',
-        platform: '',
-      }).toString(),
-      {
-        headers: {
-          'content-type': 'application/x-www-form-urlencoded',
-          header_clientlang: 'en',
+      const api = await this.apiForUser(username, urlResult.baseUrl);
+      const response = await api.post(
+        'api/v4/email/code/send',
+        new URLSearchParams({
+          email: username,
+          type: 'login',
+          platform: '',
+        }).toString(),
+        {
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            header_clientlang: 'en',
+          },
         },
-      },
-    );
+      );
 
-    return urlResult;
+      // Check if the API returned an error in the response body
+      const data = response.data as { code?: number; msg?: string };
+      if (data.code && data.code !== 200 && data.code !== 0) {
+        throw new RoborockApiError(`Failed to send 2FA code: ${data.msg}`, data.code, data.msg);
+      }
+
+      this.logger.debug('2FA code request sent successfully');
+      return urlResult;
+    } catch (error) {
+      throw extractErrorMessage(error, 'Failed to request 2FA code');
+    }
   }
 
   /**
@@ -73,16 +119,20 @@ export class RoborockAuthenticateApi {
    * @returns UserData containing authentication tokens
    */
   public async loginWithCode(username: string, twofa: string, baseUrl: string): Promise<UserData> {
-    const api = await this.apiForUser(username, baseUrl);
-    const response = await api.post(
-      'api/v1/login',
-      new URLSearchParams({
-        username: username,
-        verifycode: twofa,
-        verifycodetype: 'AUTH_EMAIL_CODE',
-      }).toString(),
-    );
-    return this.auth(username, response.data);
+    try {
+      const api = await this.apiForUser(username, baseUrl);
+      const response = await api.post(
+        'api/v1/login',
+        new URLSearchParams({
+          username: username,
+          verifycode: twofa,
+          verifycodetype: 'AUTH_EMAIL_CODE',
+        }).toString(),
+      );
+      return this.auth(username, response.data);
+    } catch (error) {
+      throw extractErrorMessage(error, 'Login with 2FA code failed');
+    }
   }
 
   /**
@@ -95,37 +145,41 @@ export class RoborockAuthenticateApi {
    * @returns UserData containing authentication tokens
    */
   public async loginWithCodeV4(username: string, twofa: string, baseUrl: string, country: string, countryCode: string): Promise<UserData> {
-    const xMercyKs = crypto.randomUUID().substring(0, 16);
-    const signCode = await this.signKeyV3(username, baseUrl, xMercyKs);
+    try {
+      const xMercyKs = crypto.randomUUID().substring(0, 16);
+      const signCode = await this.signKeyV3(username, baseUrl, xMercyKs);
 
-    if (!signCode?.data?.k) {
-      throw new Error('Failed to obtain sign key for V4 login');
-    }
+      if (!signCode?.data?.k) {
+        throw new RoborockApiError('Failed to obtain sign key for V4 login');
+      }
 
-    const api = await this.apiForUser(username, baseUrl);
-    const response = await api.post(
-      'api/v4/auth/email/login/code',
-      new URLSearchParams({
-        country: country,
-        countryCode: countryCode,
-        email: username,
-        code: twofa,
-        majorVersion: '14',
-        minorVersion: '0',
-      }).toString(),
-      {
-        headers: {
-          'content-type': 'application/json',
-          'x-mercy-ks': xMercyKs,
-          'x-mercy-k': signCode.data.k,
-          header_clientlang: 'en',
-          header_appversion: '4.54.02',
-          header_phonesystem: 'iOS',
-          header_phonemodel: 'iPhone16,1',
+      const api = await this.apiForUser(username, baseUrl);
+      const response = await api.post(
+        'api/v4/auth/email/login/code',
+        new URLSearchParams({
+          country: country,
+          countryCode: countryCode,
+          email: username,
+          code: twofa,
+          majorVersion: '14',
+          minorVersion: '0',
+        }).toString(),
+        {
+          headers: {
+            'content-type': 'application/json',
+            'x-mercy-ks': xMercyKs,
+            'x-mercy-k': signCode.data.k,
+            header_clientlang: 'en',
+            header_appversion: '4.54.02',
+            header_phonesystem: 'iOS',
+            header_phonemodel: 'iPhone16,1',
+          },
         },
-      },
-    );
-    return this.auth(username, response.data);
+      );
+      return this.auth(username, response.data);
+    } catch (error) {
+      throw extractErrorMessage(error, 'Login with 2FA code (V4) failed');
+    }
   }
 
   /**
@@ -163,28 +217,32 @@ export class RoborockAuthenticateApi {
   }
 
   private async getUrlByEmail(username: string): Promise<UrlByEmailResult> {
-    const api = await this.apiForUser(username);
-    const response = await api.post(
-      'api/v1/getUrlByEmail',
-      new URLSearchParams({
-        email: username,
-        needtwostepauth: 'false',
-      }).toString(),
-    );
+    try {
+      const api = await this.apiForUser(username);
+      const response = await api.post(
+        'api/v1/getUrlByEmail',
+        new URLSearchParams({
+          email: username,
+          needtwostepauth: 'false',
+        }).toString(),
+      );
 
-    const apiResponse: AuthenticateResponse<BaseUrl> = response.data;
-    if (!apiResponse.data) {
-      throw new Error('Failed to retrieve base URL: ' + apiResponse.msg);
+      const apiResponse: AuthenticateResponse<BaseUrl> = response.data;
+      if (!apiResponse.data) {
+        throw new RoborockApiError(`Failed to retrieve base URL: ${apiResponse.msg}`, apiResponse.code, apiResponse.msg);
+      }
+
+      this.country = apiResponse.data.country;
+      this.countryCode = apiResponse.data.countrycode;
+
+      return {
+        baseUrl: apiResponse.data.url,
+        country: apiResponse.data.country,
+        countryCode: apiResponse.data.countrycode,
+      };
+    } catch (error) {
+      throw extractErrorMessage(error, 'Failed to get URL by email');
     }
-
-    this.country = apiResponse.data.country;
-    this.countryCode = apiResponse.data.countrycode;
-
-    return {
-      baseUrl: apiResponse.data.url,
-      country: apiResponse.data.country,
-      countryCode: apiResponse.data.countrycode,
-    };
   }
 
   private async apiForUser(username: string, baseUrl = 'https://usiot.roborock.com'): Promise<AxiosInstance> {
@@ -200,7 +258,7 @@ export class RoborockAuthenticateApi {
   private auth(username: string, response: AuthenticateResponse<UserData>): UserData {
     const userdata = response.data;
     if (!userdata || !userdata.token) {
-      throw new Error('Authentication failed: ' + response.msg + ' code: ' + response.code);
+      throw new RoborockApiError(`Authentication failed: ${response.msg}`, response.code, response.msg);
     }
 
     this.loginWithAuthToken(username, userdata.token);

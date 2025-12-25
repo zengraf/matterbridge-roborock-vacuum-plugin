@@ -1,4 +1,4 @@
-export { RoborockAuthenticateApi, type UrlByEmailResult } from './RESTAPI/roborockAuthenticateApi.js';
+export { RoborockAuthenticateApi, RoborockApiError, type UrlByEmailResult } from './RESTAPI/roborockAuthenticateApi.js';
 export { RoborockIoTApi } from './RESTAPI/roborockIoTApi.js';
 export { MessageProcessor } from './broadcast/messageProcessor.js';
 export { VacuumErrorCode } from './Zenum/vacuumAndDockErrorCode.js';

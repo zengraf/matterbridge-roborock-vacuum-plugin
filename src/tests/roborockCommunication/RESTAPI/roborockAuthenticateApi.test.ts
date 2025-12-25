@@ -7,7 +7,7 @@ describe('RoborockAuthenticateApi', () => {
   let api: any;
 
   beforeEach(() => {
-    mockLogger = { info: jest.fn(), error: jest.fn() };
+    mockLogger = { info: jest.fn(), error: jest.fn(), debug: jest.fn() };
     mockAxiosInstance = {
       post: jest.fn(),
       get: jest.fn(),
@@ -174,7 +174,7 @@ describe('RoborockAuthenticateApi', () => {
 
   it('auth should throw error if token missing', () => {
     const response = { data: null, msg: 'fail', code: 401 };
-    expect(() => api['auth']('user', response)).toThrow('Authentication failed: fail code: 401');
+    expect(() => api['auth']('user', response)).toThrow('Authentication failed: fail');
   });
 
   it('loginWithAuthToken should set username and authToken', () => {
