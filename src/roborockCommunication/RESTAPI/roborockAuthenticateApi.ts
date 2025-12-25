@@ -154,28 +154,27 @@ export class RoborockAuthenticateApi {
       }
 
       const api = await this.apiForUser(username, baseUrl);
-      const response = await api.post(
-        'api/v4/auth/email/login/code',
-        new URLSearchParams({
-          country: country,
-          countryCode: countryCode,
-          email: username,
-          code: twofa,
-          majorVersion: '14',
-          minorVersion: '0',
-        }).toString(),
-        {
-          headers: {
-            'content-type': 'application/x-www-form-urlencoded',
-            'x-mercy-ks': xMercyKs,
-            'x-mercy-k': signCode.data.k,
-            header_clientlang: 'en',
-            header_appversion: '4.54.02',
-            header_phonesystem: 'iOS',
-            header_phonemodel: 'iPhone16,1',
-          },
+      const params = new URLSearchParams({
+        country: country,
+        countryCode: countryCode,
+        email: username,
+        code: twofa,
+        majorVersion: '14',
+        minorVersion: '0',
+      });
+      this.logger.debug(`loginWithCodeV4 request: country=${country}, countryCode=${countryCode}, email=${username}, code=${twofa}`);
+
+      const response = await api.post('api/v4/auth/email/login/code', params.toString(), {
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-mercy-ks': xMercyKs,
+          'x-mercy-k': signCode.data.k,
+          header_clientlang: 'en',
+          header_appversion: '4.54.02',
+          header_phonesystem: 'iOS',
+          header_phonemodel: 'iPhone16,1',
         },
-      );
+      });
       return this.auth(username, response.data);
     } catch (error) {
       throw extractErrorMessage(error, 'Login with 2FA code (V4) failed');
