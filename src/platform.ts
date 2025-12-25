@@ -151,8 +151,24 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
 
         this.log.notice('Successfully authenticated with Roborock!');
       } catch (error) {
-        this.log.error('Failed to login with 2FA code:', debugStringify(error as object));
-        this.log.error('Please check that the 2FA code is correct and try again.');
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        // Check if this is an expired/invalid 2FA code error
+        if (errorMsg.includes('2031') || errorMsg.includes('two step')) {
+          this.log.warn('The 2FA code is invalid or expired. Requesting a new code...');
+          try {
+            await this.persist.removeItem('pendingAuth');
+            const urlResult = await this.roborockService.requestCode(username);
+            await this.persist.setItem('pendingAuth', urlResult);
+            this.log.notice(
+              'A new 2FA verification code has been sent to your email. Please update the "twofa" field in the plugin configuration with the new code you received, then restart the plugin.',
+            );
+          } catch (requestError) {
+            this.log.error('Failed to request new 2FA code:', debugStringify(requestError as object));
+          }
+        } else {
+          this.log.error('Failed to login with 2FA code:', debugStringify(error as object));
+          this.log.error('Please check that the 2FA code is correct and try again.');
+        }
         return;
       }
     }
