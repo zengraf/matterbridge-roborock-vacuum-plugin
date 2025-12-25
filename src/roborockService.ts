@@ -79,6 +79,16 @@ export default class RoborockService {
   }
 
   /**
+   * Gets URL and country info for a user without sending a 2FA code.
+   * @param username The user's email address
+   * @returns The URL result containing base URL and country info
+   */
+  public async getUrlInfo(username: string): Promise<UrlByEmailResult> {
+    this.logger.debug('Getting URL info for user', username);
+    return this.loginApi.getUrlInfo(username);
+  }
+
+  /**
    * Requests a 2FA code to be sent to the user's email.
    * @param username The user's email address
    * @returns The URL result containing base URL and country info for later use

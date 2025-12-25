@@ -138,9 +138,9 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
         let urlResult = (await this.persist.getItem('pendingAuth')) as { baseUrl: string; country: string; countryCode: string } | undefined;
 
         if (!urlResult) {
-          // If no pending auth, request a new code first (this handles the case where user provides twofa directly)
-          this.log.debug('No pending auth found, requesting URL info...');
-          urlResult = await this.roborockService.requestCode(username);
+          // If no pending auth, just get the URL info without requesting a new code
+          this.log.debug('No pending auth found, getting URL info...');
+          urlResult = await this.roborockService.getUrlInfo(username);
         }
 
         userData = await this.roborockService.loginWithCode(username, twofa, urlResult, async (userData: UserData) => {

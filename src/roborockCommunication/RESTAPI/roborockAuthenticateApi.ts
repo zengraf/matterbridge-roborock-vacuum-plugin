@@ -70,6 +70,19 @@ export class RoborockAuthenticateApi {
   }
 
   /**
+   * Gets the URL and country information for a user without sending a 2FA code.
+   * @param username The user's email address
+   * @returns The base URL and country information for subsequent API calls
+   */
+  public async getUrlInfo(username: string): Promise<UrlByEmailResult> {
+    try {
+      return await this.getUrlByEmail(username);
+    } catch (error) {
+      throw extractErrorMessage(error, 'Failed to get URL info');
+    }
+  }
+
+  /**
    * Requests a 2FA code to be sent to the user's email.
    * @param username The user's email address
    * @returns The base URL and country information for subsequent API calls
@@ -154,7 +167,8 @@ export class RoborockAuthenticateApi {
       }
 
       const api = await this.apiForUser(username, baseUrl);
-      const params = new URLSearchParams({
+      // Parameters go in the query string, not the body
+      const queryParams = new URLSearchParams({
         country: country,
         countryCode: countryCode,
         email: username,
@@ -162,11 +176,12 @@ export class RoborockAuthenticateApi {
         majorVersion: '14',
         minorVersion: '0',
       });
-      this.logger.debug(`loginWithCodeV4 request: country=${country}, countryCode=${countryCode}, email=${username}, code=${twofa}`);
+      const url = `api/v4/auth/email/login/code?${queryParams.toString()}`;
+      this.logger.debug(`loginWithCodeV4 request URL: ${url}`);
 
-      const response = await api.post('api/v4/auth/email/login/code', params.toString(), {
+      const response = await api.post(url, null, {
         headers: {
-          'content-type': 'application/x-www-form-urlencoded',
+          'content-type': 'application/json',
           'x-mercy-ks': xMercyKs,
           'x-mercy-k': signCode.data.k,
           header_clientlang: 'en',
