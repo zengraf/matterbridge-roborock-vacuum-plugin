@@ -109,13 +109,17 @@ export default class RoborockService {
   public async loginWithCode(username: string, twofa: string, urlResult: UrlByEmailResult, savedUserData: (userData: UserData) => Promise<void>): Promise<UserData> {
     let userdata: UserData;
 
-    // Use V4 login if country info is available, otherwise fall back to V1
-    if (urlResult.country && urlResult.countryCode) {
-      this.logger.debug('Logging in with V4 API using country info');
-      userdata = await this.loginApi.loginWithCodeV4(username, twofa, urlResult.baseUrl, urlResult.country, urlResult.countryCode);
-    } else {
-      this.logger.debug('Logging in with V1 API (no country info available)');
+    // Try V1 first, fall back to V4 if it fails
+    try {
+      this.logger.debug('Logging in with V1 API');
       userdata = await this.loginApi.loginWithCode(username, twofa, urlResult.baseUrl);
+    } catch (v1Error) {
+      this.logger.debug('V1 login failed, trying V4 API');
+      if (urlResult.country && urlResult.countryCode) {
+        userdata = await this.loginApi.loginWithCodeV4(username, twofa, urlResult.baseUrl, urlResult.country, urlResult.countryCode);
+      } else {
+        throw v1Error;
+      }
     }
 
     await savedUserData(userdata);

@@ -134,14 +134,17 @@ export class RoborockAuthenticateApi {
   public async loginWithCode(username: string, twofa: string, baseUrl: string): Promise<UserData> {
     try {
       const api = await this.apiForUser(username, baseUrl);
-      const response = await api.post(
-        'api/v1/login',
-        new URLSearchParams({
-          username: username,
-          verifycode: twofa,
-          verifycodetype: 'AUTH_EMAIL_CODE',
-        }).toString(),
-      );
+      const params = new URLSearchParams({
+        username: username,
+        verifycode: twofa,
+        verifycodetype: 'AUTH_EMAIL_CODE',
+      });
+      this.logger.debug(`loginWithCode V1 request: username=${username}, verifycode=${twofa}`);
+      const response = await api.post('api/v1/loginWithCode', params.toString(), {
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+      });
       return this.auth(username, response.data);
     } catch (error) {
       throw extractErrorMessage(error, 'Login with 2FA code failed');
