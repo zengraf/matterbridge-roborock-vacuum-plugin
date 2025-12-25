@@ -151,9 +151,20 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
 
         this.log.notice('Successfully authenticated with Roborock!');
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        // Extract error message from various error formats (axios, standard Error, etc.)
+        let errorMsg = '';
+        if (error instanceof Error) {
+          errorMsg = error.message;
+        }
+        // Check axios error response
+        const axiosError = error as { response?: { data?: { msg?: string; code?: number } } };
+        if (axiosError?.response?.data) {
+          errorMsg += ` ${axiosError.response.data.msg || ''} ${axiosError.response.data.code || ''}`;
+        }
+        this.log.debug('Login error details:', errorMsg, debugStringify(error as object));
+
         // Check if this is an expired/invalid 2FA code error
-        if (errorMsg.includes('2031') || errorMsg.includes('two step')) {
+        if (errorMsg.includes('2031') || errorMsg.includes('two step') || errorMsg.includes('verify') || errorMsg.includes('code')) {
           this.log.warn('The 2FA code is invalid or expired. Requesting a new code...');
           try {
             await this.persist.removeItem('pendingAuth');
