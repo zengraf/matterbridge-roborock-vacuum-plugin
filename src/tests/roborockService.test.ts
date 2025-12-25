@@ -173,6 +173,20 @@ describe('RoborockService - startClean', () => {
     expect(result).toBeUndefined();
   });
 
+  it('should return undefined and clear saved data when session is invalid', async () => {
+    const username = 'user';
+    const userData = { foo: 'bar' };
+    mockLoginApi.loginWithUserData.mockRejectedValue(new Error('need two step validate code: 2031'));
+    const loadSavedUserData = jest.fn().mockResolvedValue(userData);
+    const clearSavedUserData = jest.fn().mockResolvedValue(undefined);
+
+    const result = await roborockService.restoreSession(username, loadSavedUserData, clearSavedUserData);
+
+    expect(mockLogger.debug).toHaveBeenCalledWith('Saved session is invalid or expired, will request new 2FA code');
+    expect(clearSavedUserData).toHaveBeenCalled();
+    expect(result).toBeUndefined();
+  });
+
   it('should start global clean when no areas or selected areas are provided', async () => {
     const duid = 'test-duid';
     roborockService['supportedAreas'].set(duid, []);

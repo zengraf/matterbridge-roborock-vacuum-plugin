@@ -95,14 +95,21 @@ export class RoborockMatterbridgePlatform extends MatterbridgeDynamicPlatform {
     let userData: UserData | undefined;
 
     if (!this.enableExperimentalFeature?.enableExperimentalFeature || !this.enableExperimentalFeature.advancedFeature?.alwaysExecuteAuthentication) {
-      userData = await this.roborockService.restoreSession(username, async () => {
-        const savedUserData = (await this.persist.getItem('userData')) as UserData | undefined;
-        if (savedUserData) {
-          this.log.debug('Loading saved userData:', debugStringify(savedUserData));
-          return savedUserData;
-        }
-        return undefined;
-      });
+      userData = await this.roborockService.restoreSession(
+        username,
+        async () => {
+          const savedUserData = (await this.persist.getItem('userData')) as UserData | undefined;
+          if (savedUserData) {
+            this.log.debug('Loading saved userData:', debugStringify(savedUserData));
+            return savedUserData;
+          }
+          return undefined;
+        },
+        async () => {
+          this.log.debug('Clearing invalid saved userData');
+          await this.persist.removeItem('userData');
+        },
+      );
     }
 
     // If no saved session, we need to authenticate with OTP

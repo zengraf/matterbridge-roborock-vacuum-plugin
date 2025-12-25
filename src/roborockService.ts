@@ -116,9 +116,10 @@ export default class RoborockService {
    * Attempts to restore a session using saved user data.
    * @param username The user's email address
    * @param loadSavedUserData Callback to load saved user data
+   * @param clearSavedUserData Callback to clear invalid saved user data
    * @returns UserData if saved data exists and is valid, undefined otherwise
    */
-  public async restoreSession(username: string, loadSavedUserData: () => Promise<UserData | undefined>): Promise<UserData | undefined> {
+  public async restoreSession(username: string, loadSavedUserData: () => Promise<UserData | undefined>, clearSavedUserData?: () => Promise<void>): Promise<UserData | undefined> {
     const userdata = await loadSavedUserData();
 
     if (!userdata) {
@@ -126,9 +127,17 @@ export default class RoborockService {
       return undefined;
     }
 
-    this.logger.debug('Using saved user data for login', debugStringify(userdata));
-    const restoredUserData = await this.loginApi.loginWithUserData(username, userdata);
-    return this.auth(restoredUserData);
+    try {
+      this.logger.debug('Using saved user data for login', debugStringify(userdata));
+      const restoredUserData = await this.loginApi.loginWithUserData(username, userdata);
+      return this.auth(restoredUserData);
+    } catch (error) {
+      this.logger.debug('Saved session is invalid or expired, will request new 2FA code');
+      if (clearSavedUserData) {
+        await clearSavedUserData();
+      }
+      return undefined;
+    }
   }
 
   public getMessageProcessor(duid: string): MessageProcessor | undefined {
