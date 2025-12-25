@@ -166,7 +166,7 @@ export class RoborockAuthenticateApi {
         }).toString(),
         {
           headers: {
-            'content-type': 'application/json',
+            'content-type': 'application/x-www-form-urlencoded',
             'x-mercy-ks': xMercyKs,
             'x-mercy-k': signCode.data.k,
             header_clientlang: 'en',
