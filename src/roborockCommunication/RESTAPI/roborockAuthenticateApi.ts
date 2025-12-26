@@ -170,8 +170,8 @@ export class RoborockAuthenticateApi {
       }
 
       const api = await this.apiForUser(username, baseUrl);
-      // Parameters go in the query string, not the body
-      const queryParams = new URLSearchParams({
+      // Parameters go in the body as form-urlencoded
+      const params = new URLSearchParams({
         country: country,
         countryCode: countryCode,
         email: username,
@@ -179,12 +179,11 @@ export class RoborockAuthenticateApi {
         majorVersion: '14',
         minorVersion: '0',
       });
-      const url = `api/v4/auth/email/login/code?${queryParams.toString()}`;
-      this.logger.debug(`loginWithCodeV4 request URL: ${url}`);
+      this.logger.debug(`loginWithCodeV4 request: country=${country}, countryCode=${countryCode}, email=${username}, code=${twofa}`);
 
-      const response = await api.post(url, null, {
+      const response = await api.post('api/v4/auth/email/login/code', params.toString(), {
         headers: {
-          'content-type': 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
           'x-mercy-ks': xMercyKs,
           'x-mercy-k': signCode.data.k,
           header_clientlang: 'en',
@@ -203,14 +202,21 @@ export class RoborockAuthenticateApi {
    * Signs a key using the V3 API (required for V4 login).
    */
   private async signKeyV3(username: string, baseUrl: string, nonce: string): Promise<SignCodeV3 | undefined> {
-    const api = await this.apiForUser(username, baseUrl);
-    const response = await api.post(
-      'api/v3/key/sign',
-      new URLSearchParams({
-        s: nonce,
-      }).toString(),
-    );
-    return response.data as SignCodeV3;
+    try {
+      const api = await this.apiForUser(username, baseUrl);
+      const response = await api.post(
+        'api/v3/key/sign',
+        new URLSearchParams({
+          s: nonce,
+        }).toString(),
+      );
+      this.logger.debug(`signKeyV3 response: ${JSON.stringify(response.data)}`);
+      return response.data as SignCodeV3;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`signKeyV3 failed: ${errorMsg}`);
+      return undefined;
+    }
   }
 
   public async getHomeDetails(): Promise<HomeInfo | undefined> {
